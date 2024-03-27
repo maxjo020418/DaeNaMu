@@ -1,1 +1,1 @@
-from . import diff
+from .diff import *

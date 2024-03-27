@@ -1,0 +1,16 @@
+from DaeNaMu import *
+
+A = Square()
+B = Exp()
+C = Square()
+
+# forward prop
+x = Variable(np.array(0.5), verbose=True)
+a = A(x)  # 0
+b = B(a)  # 1
+y = C(b)  # 2
+
+# backprop
+y.grad = np.array(1.0)
+y.backward()
+print(x.grad)
