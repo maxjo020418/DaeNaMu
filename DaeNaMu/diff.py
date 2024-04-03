@@ -1,5 +1,6 @@
 import numpy as np
 from typing import List
+import collections
 
 
 class Variable:
@@ -54,7 +55,7 @@ class Variable:
             i += 1
 
 
-class Function:
+class FunctionTemp:
     def __call__(self, inp: 'Variable') -> 'Variable':
         self.inp: 'Variable' = inp
         x = inp.data  # decapsulate
@@ -81,6 +82,54 @@ class Function:
 
     def backward(self, x):
         raise NotImplementedError()
+
+
+class Function:
+    def __init__(self):
+        self.layer_id = None
+
+    def __call__(self, inputs: List['Variable']) -> List['Variable']:
+
+        self.inputs: List['Variable'] = inputs
+        xs, vbs = [inp.data for inp in inputs], [inp.verbose for inp in inputs]  # decapsulate
+        ys = self.forward(xs)
+
+        """
+        0 dimension np arrays will return np.float after operations!
+        https://stackoverflow.com/questions/77359660/why-does-operating-on-a-0d-numpy-array-give-a-numpy-float
+        https://stackoverflow.com/questions/773030/why-are-0d-arrays-in-numpy-not-considered-scalar
+        made to cast it back to np.array before passing it in case it is a scalar
+        """
+        def as_array(y):
+            return np.array(y) if np.isscalar(y) else y
+
+        outs = [Variable(as_array(y), verbose=vb) for y, vb in zip(ys, vbs)]
+        [out.set_creator(self) for out in outs]
+        self.outs = outs
+
+        # checks if all the Variable's `.creator` in the `inputs` are the same
+        creators = [inp.creator.layer_id for inp in self.inputs]
+        if len(set(creators)) != 1:
+            raise Exception('Some of the variables are from a different creator/parent!\n'
+                            f'creator lists dump: {collections.Counter(creators)}')
+        # setting layer ID if the above assertion passes
+        # used creators[0]'s layer_id since it's going to be all the same anyway
+        self.layer_id = prev_layer.layer_id + 1 if (prev_layer := creators[0]) else 0
+
+        return outs
+
+    def forward(self, x):
+        raise NotImplementedError()
+
+    def backward(self, x):
+        raise NotImplementedError()
+
+
+class Add(Function):
+    def forward(self, xs):
+        x0, x1 = xs
+        y = x0 + x1
+        return (y, )
 
 
 # purpose of gy is a bit vague?
