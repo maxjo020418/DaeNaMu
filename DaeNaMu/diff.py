@@ -1,5 +1,5 @@
 import numpy as np
-from typing import List
+from typing import List, Union, Any
 import collections
 
 
@@ -11,6 +11,7 @@ class Variable:
         self.data: np.ndarray = data
         self.grad: np.ndarray = None
         self.creator: 'Function' = None
+        self.generation = 0
 
         self.verbose = verbose
         if verbose:
@@ -26,73 +27,61 @@ class Variable:
     def _silent_print(*inp, end: str = None) -> None:
         return
 
+    def cleargrad(self):
+        self.grad = None
+
     def set_creator(self, func: 'Function') -> None:
         self.creator = func
+        self.generation = func.generation + 1
 
     def backward(self) -> None:
-        self.vprint('=== Backprop triggered! ===')
+        """
+
+        """
+
         if self.grad is None:
             # does this count as filling in dummy data?
             self.grad = np.ones_like(self.data)
-            self.vprint(f'empty self.grad, creating dummy data -> {self.grad}')
 
-        funcs: List['Function'] = [self.creator]
-        i = 0
-        self.vprint(f'initial funcs: {[func.layer_id for func in funcs]}')
+        funcs = list()
+        seen_set = set()
+
+        def add_func(f):
+            if f not in seen_set:
+                funcs.append(f)
+                seen_set.add(f)
+                funcs.sort(key=lambda x: x.generation)
+
+        add_func(self.creator)
+
         while funcs:
-            self.vprint(f'loop iter. {i}', end=' | ')
             f: 'Function' = funcs.pop()
-            self.vprint(f'popped function_id: {f.layer_id}', end=' -> ')
-            x, y = f.inp, f.out
-            x.grad = f.backward(y.grad)
+            gys = [out.grad for out in f.outs]
+            gxs = f.backward(*gys)
 
-            if x.creator is not None:
-                funcs.append(x.creator)
-                self.vprint(f'funcs after appending: {[func.layer_id for func in funcs]}')
-            else:
-                self.vprint('breaking loop!')
+            if not isinstance(gxs, tuple):
+                gxs = (gxs, )
 
-            i += 1
+            for x, gx in zip(f.inputs, gxs):
+                if x.grad is None:
+                    x.grad = gx
+                else:
+                    x.grad = x.grad + gx
 
-
-class FunctionTemp:
-    def __call__(self, inp: 'Variable') -> 'Variable':
-        self.inp: 'Variable' = inp
-        x = inp.data  # decapsulate
-        y = self.forward(x)
-
-        """
-        0 dimension np arrays will return np.float after operations!
-        https://stackoverflow.com/questions/77359660/why-does-operating-on-a-0d-numpy-array-give-a-numpy-float
-        https://stackoverflow.com/questions/773030/why-are-0d-arrays-in-numpy-not-considered-scalar
-        made to cast it back to np.array before passing it in case it is a scalar
-        """
-        y = np.array(y) if np.isscalar(y) else y
-
-        out = Variable(y, verbose=inp.verbose)  # encapsulate / passing on the verbose value
-        out.set_creator(self)
-        self.out = out
-
-        self.layer_id = prev_layer.layer_id + 1 if (prev_layer := self.inp.creator) else 0
-
-        return out
-
-    def forward(self, x):
-        raise NotImplementedError()
-
-    def backward(self, x):
-        raise NotImplementedError()
+                if x.creator is not None:
+                    add_func(x.creator)
 
 
 class Function:
-    def __init__(self):
-        self.layer_id = None
 
-    def __call__(self, inputs: List['Variable']) -> List['Variable']:
+    def __call__(self, *inputs: 'Variable') -> Any:  # Union['Variable', List['Variable']]
 
-        self.inputs: List['Variable'] = inputs
+        self.inputs = inputs
         xs, vbs = [inp.data for inp in inputs], [inp.verbose for inp in inputs]  # decapsulate
-        ys = self.forward(xs)
+        ys = self.forward(*xs)
+        ys = ys if isinstance(ys, tuple) else (ys,)
+
+        self.generation = max([x.generation for x in inputs])
 
         """
         0 dimension np arrays will return np.float after operations!
@@ -108,15 +97,15 @@ class Function:
         self.outs = outs
 
         # checks if all the Variable's `.creator` in the `inputs` are the same
-        creators = [inp.creator.layer_id for inp in self.inputs]
-        if len(set(creators)) != 1:
-            raise Exception('Some of the variables are from a different creator/parent!\n'
-                            f'creator lists dump: {collections.Counter(creators)}')
+        # creators = [inp.creator.layer_id for inp in self.inputs]
+        # if len(set(creators)) != 1:
+        #    raise Exception('Some of the variables are from a different creator/parent!\n'
+        #                    f'creator lists dump: {collections.Counter(creators)}')
         # setting layer ID if the above assertion passes
         # used creators[0]'s layer_id since it's going to be all the same anyway
-        self.layer_id = prev_layer.layer_id + 1 if (prev_layer := creators[0]) else 0
+        # self.layer_id = prev_layer.layer_id + 1 if (prev_layer := creators[0]) else 0
 
-        return outs
+        return outs if len(outs) > 1 else outs[0]
 
     def forward(self, x):
         raise NotImplementedError()
@@ -126,10 +115,12 @@ class Function:
 
 
 class Add(Function):
-    def forward(self, xs):
-        x0, x1 = xs
+    def forward(self, x0, x1):
         y = x0 + x1
-        return (y, )
+        return y
+
+    def backward(self, gy):
+        return gy, gy
 
 
 # purpose of gy is a bit vague?
@@ -139,7 +130,7 @@ class Square(Function):
         return x ** 2
 
     def backward(self, gy):
-        x = self.inp.data
+        x = self.inputs[0].data
         gx = 2 * x * gy
         return gx
 
@@ -149,6 +140,6 @@ class Exp(Function):
         return np.exp(x)
 
     def backward(self, gy):
-        x = self.inp.data
+        x = self.inputs[0].data
         gx = np.exp(x) * gy
         return gx
