@@ -1,9 +1,18 @@
 import numpy as np
-from typing import List, Union, Any
-import collections
+from typing import Any
+from dataclasses import dataclass
+
+
+@dataclass
+class Config:
+    verbose: bool = True
 
 
 class Variable:
+    """
+    might be able to change this into a @dataclass?
+    """
+
     def __init__(self, data: np.ndarray, verbose: bool = False) -> None:
         if (data is not None) & (not isinstance(data, np.ndarray)):
             raise TypeError(f'{type(data)} is not supported.')
@@ -13,8 +22,9 @@ class Variable:
         self.creator: 'Function' = None
         self.generation = 0
 
-        self.verbose = verbose
+        self.verbose = Config.verbose
         if verbose:
+            print('verbose: ', verbose)
             self.vprint = self._verbose_print
         else:
             self.vprint = self._silent_print
@@ -46,11 +56,11 @@ class Variable:
         funcs = list()
         seen_set = set()
 
-        def add_func(f):
-            if f not in seen_set:
-                funcs.append(f)
-                seen_set.add(f)
-                funcs.sort(key=lambda x: x.generation)
+        def add_func(func):
+            if func not in seen_set:
+                funcs.append(func)
+                seen_set.add(func)
+                funcs.sort(key=lambda inp: inp.generation)
 
         add_func(self.creator)
 
@@ -60,7 +70,7 @@ class Variable:
             gxs = f.backward(*gys)
 
             if not isinstance(gxs, tuple):
-                gxs = (gxs, )
+                gxs = (gxs,)
 
             for x, gx in zip(f.inputs, gxs):
                 if x.grad is None:
@@ -73,7 +83,6 @@ class Variable:
 
 
 class Function:
-
     def __call__(self, *inputs: 'Variable') -> Any:  # Union['Variable', List['Variable']]
 
         self.inputs = inputs
@@ -89,6 +98,7 @@ class Function:
         https://stackoverflow.com/questions/773030/why-are-0d-arrays-in-numpy-not-considered-scalar
         made to cast it back to np.array before passing it in case it is a scalar
         """
+
         def as_array(y):
             return np.array(y) if np.isscalar(y) else y
 
@@ -112,34 +122,3 @@ class Function:
 
     def backward(self, x):
         raise NotImplementedError()
-
-
-class Add(Function):
-    def forward(self, x0, x1):
-        y = x0 + x1
-        return y
-
-    def backward(self, gy):
-        return gy, gy
-
-
-# purpose of gy is a bit vague?
-# gy: gradient with respect to y
-class Square(Function):
-    def forward(self, x):
-        return x ** 2
-
-    def backward(self, gy):
-        x = self.inputs[0].data
-        gx = 2 * x * gy
-        return gx
-
-
-class Exp(Function):
-    def forward(self, x):
-        return np.exp(x)
-
-    def backward(self, gy):
-        x = self.inputs[0].data
-        gx = np.exp(x) * gy
-        return gx
