@@ -18,6 +18,8 @@ class Square(Function):
         return x ** 2
 
     def backward(self, gy):
+        # using the first element of `inputs`,
+        # every element inside `inputs` should be all same.
         x = self.inputs[0].data
         gx = 2 * x * gy
         return gx

@@ -1,5 +1,6 @@
 import numpy as np
-from typing import Any
+import weakref
+from typing import Any, List
 from dataclasses import dataclass
 
 
@@ -24,7 +25,6 @@ class Variable:
 
         self.verbose = Config.verbose
         if verbose:
-            print('verbose: ', verbose)
             self.vprint = self._verbose_print
         else:
             self.vprint = self._silent_print
@@ -48,42 +48,66 @@ class Variable:
         """
 
         """
+        self.vprint('=== begin backprop ===')
 
         if self.grad is None:
             # does this count as filling in dummy data?
             self.grad = np.ones_like(self.data)
+            self.vprint('filled in dummy data')
 
         funcs = list()
         seen_set = set()
 
         def add_func(func):
+            # if statement made in case there are multiple inputs (at branch start)
             if func not in seen_set:
+                self.vprint(f'added {func} funcs and seen_set')
                 funcs.append(func)
                 seen_set.add(func)
                 funcs.sort(key=lambda inp: inp.generation)
+            else:
+                self.vprint('`func` in `seen_set`!')
 
         add_func(self.creator)
+        self.vprint('loop init:\n', 'funcs:', funcs, '\nseen_set:', seen_set, '\n', '='*10)
 
+        i = 1
         while funcs:
+            self.vprint('loop no.', i)
             f: 'Function' = funcs.pop()
-            gys = [out.grad for out in f.outs]
+            self.vprint(f'popped {f}, remaining: {funcs}')
+            gys = [out().grad for out in f.outs]  # outs is a list of weakrefs
+            self.vprint(f'gys: {gys}')
             gxs = f.backward(*gys)
 
             if not isinstance(gxs, tuple):
+                self.vprint('converting to tuple...')
                 gxs = (gxs,)
 
             for x, gx in zip(f.inputs, gxs):
+
+                # if statement for ADD operations (p.123)
                 if x.grad is None:
                     x.grad = gx
                 else:
+                    """
+                    `x.grad` will exist if the 
+                    
+                    """
+                    self.vprint('gradient added!')
                     x.grad = x.grad + gx
 
                 if x.creator is not None:
                     add_func(x.creator)
+                else:
+                    self.vprint('breaking loop!')
+
+            self.vprint('='*10)
+            i += 1
 
 
 class Function:
-    def __call__(self, *inputs: 'Variable') -> Any:  # Union['Variable', List['Variable']]
+    def __call__(self, *inputs: 'Variable') -> Any:
 
         self.inputs = inputs
         xs, vbs = [inp.data for inp in inputs], [inp.verbose for inp in inputs]  # decapsulate
@@ -104,7 +128,8 @@ class Function:
 
         outs = [Variable(as_array(y), verbose=vb) for y, vb in zip(ys, vbs)]
         [out.set_creator(self) for out in outs]
-        self.outs = outs
+        self.outs = [weakref.ref(out) for out in outs]  # p.149
+        # self.outs = outs
 
         # checks if all the Variable's `.creator` in the `inputs` are the same
         # creators = [inp.creator.layer_id for inp in self.inputs]
