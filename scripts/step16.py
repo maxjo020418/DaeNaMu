@@ -7,7 +7,6 @@ for i in range(10):
 
 x = Variable(np.array(2.0))
 a = Square()(x)
-print(a)
 y = Add()(Square()(a), Square()(a))
 y.backward()
 

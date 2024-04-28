@@ -14,7 +14,7 @@ class Variable:
     might be able to change this into a @dataclass?
     """
 
-    def __init__(self, data: np.ndarray, verbose: bool = False) -> None:
+    def __init__(self, data: np.ndarray) -> None:
         if (data is not None) & (not isinstance(data, np.ndarray)):
             raise TypeError(f'{type(data)} is not supported.')
 
@@ -24,7 +24,7 @@ class Variable:
         self.generation = 0
 
         self.verbose = Config.verbose
-        if verbose:
+        if self.verbose:
             self.vprint = self._verbose_print
         else:
             self.vprint = self._silent_print
@@ -44,14 +44,14 @@ class Variable:
         self.creator = func
         self.generation = func.generation + 1
 
-    def backward(self) -> None:
+    def backward(self, retain_grad=False) -> None:
         """
 
         """
         self.vprint('=== begin backprop ===')
 
         if self.grad is None:
-            # does this count as filling in dummy data?
+            # I think this counts as filling in dummy data
             self.grad = np.ones_like(self.data)
             self.vprint('filled in dummy data')
 
@@ -66,7 +66,7 @@ class Variable:
                 seen_set.add(func)
                 funcs.sort(key=lambda inp: inp.generation)
             else:
-                self.vprint('`func` in `seen_set`!')
+                self.vprint(f'{func} in `seen_set`!')
 
         add_func(self.creator)
         self.vprint('loop init:\n', 'funcs:', funcs, '\nseen_set:', seen_set, '\n', '='*10)
@@ -76,12 +76,16 @@ class Variable:
             self.vprint('loop no.', i)
             f: 'Function' = funcs.pop()
             self.vprint(f'popped {f}, remaining: {funcs}')
-            gys = [out().grad for out in f.outs]  # outs is a list of weakrefs
-            self.vprint(f'gys: {gys}')
+
+            # outs is a list of weakrefs
+            # https://chat.openai.com/share/136a9879-bd08-40f7-a9f8-97bd02821012
+            gys = [out().grad for out in f.outs]
+
             gxs = f.backward(*gys)
+            self.vprint(f'gys: {gys}, gxs: {gxs}')
 
             if not isinstance(gxs, tuple):
-                self.vprint('converting to tuple...')
+                self.vprint('converting gxs to tuple...')
                 gxs = (gxs,)
 
             for x, gx in zip(f.inputs, gxs):
@@ -90,10 +94,6 @@ class Variable:
                 if x.grad is None:
                     x.grad = gx
                 else:
-                    """
-                    `x.grad` will exist if the 
-                    
-                    """
                     self.vprint('gradient added!')
                     x.grad = x.grad + gx
 
@@ -110,14 +110,14 @@ class Function:
     def __call__(self, *inputs: 'Variable') -> Any:
 
         self.inputs = inputs
-        xs, vbs = [inp.data for inp in inputs], [inp.verbose for inp in inputs]  # decapsulate
+        xs = [inp.data for inp in inputs]  # decapsulate
         ys = self.forward(*xs)
         ys = ys if isinstance(ys, tuple) else (ys,)
 
         self.generation = max([x.generation for x in inputs])
 
         """
-        0 dimension np arrays will return np.float after operations!
+        0 dimension np arrays will return np.float after operations for whatever reason!!
         https://stackoverflow.com/questions/77359660/why-does-operating-on-a-0d-numpy-array-give-a-numpy-float
         https://stackoverflow.com/questions/773030/why-are-0d-arrays-in-numpy-not-considered-scalar
         made to cast it back to np.array before passing it in case it is a scalar
@@ -126,10 +126,9 @@ class Function:
         def as_array(y):
             return np.array(y) if np.isscalar(y) else y
 
-        outs = [Variable(as_array(y), verbose=vb) for y, vb in zip(ys, vbs)]
+        outs = [Variable(as_array(y)) for y in ys]
         [out.set_creator(self) for out in outs]
         self.outs = [weakref.ref(out) for out in outs]  # p.149
-        # self.outs = outs
 
         # checks if all the Variable's `.creator` in the `inputs` are the same
         # creators = [inp.creator.layer_id for inp in self.inputs]
