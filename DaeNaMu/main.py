@@ -14,7 +14,7 @@ class Variable:
     might be able to change this into a @dataclass?
     """
 
-    def __init__(self, data: np.ndarray) -> None:
+    def __init__(self, data: np.ndarray, name: str = 'default') -> None:
         if (data is not None) & (not isinstance(data, np.ndarray)):
             raise TypeError(f'{type(data)} is not supported.')
 
@@ -28,6 +28,11 @@ class Variable:
             self.vprint = self._verbose_print
         else:
             self.vprint = self._silent_print
+
+        self.name_suffix = name
+        self.name = self.__class__.__name__ + '_' + str(self.generation)
+        if name != 'default':
+            self.name = self.name + '_' + self.name_suffix
 
     @staticmethod
     def _verbose_print(*inp, end: str = None) -> None:
@@ -44,6 +49,10 @@ class Variable:
         self.creator = func
         self.generation = func.generation + 1
 
+        self.name = self.__class__.__name__ + '_' + str(self.generation)
+        if self.name_suffix != 'default':
+            self.name = self.name + '_' + self.name_suffix
+
     def backward(self, retain_grad=False) -> None:
         """
 
@@ -53,7 +62,7 @@ class Variable:
         if self.grad is None:
             # I think this counts as filling in dummy data
             self.grad = np.ones_like(self.data)
-            self.vprint('filled in dummy data')
+            self.vprint(f'filled in default grad {self.grad}')
 
         funcs = list()
         seen_set = set()
@@ -61,21 +70,21 @@ class Variable:
         def add_func(func):
             # if statement made in case there are multiple inputs (at branch start)
             if func not in seen_set:
-                self.vprint(f'added {func} funcs and seen_set')
+                self.vprint(f'added {func.name} to `funcs` and `seen_set`')
                 funcs.append(func)
                 seen_set.add(func)
                 funcs.sort(key=lambda inp: inp.generation)
             else:
-                self.vprint(f'{func} in `seen_set`!')
+                self.vprint(f'{func.name} in `seen_set`!')
 
         add_func(self.creator)
-        self.vprint('loop init:\n', 'funcs:', funcs, '\nseen_set:', seen_set, '\n', '='*10)
+        self.vprint('loop init:\n', 'funcs:', [func.name for func in funcs], '\nseen_set:', [seen.name for seen in seen_set], '\n', '='*10)
 
         i = 1
         while funcs:
             self.vprint('loop no.', i)
             f: 'Function' = funcs.pop()
-            self.vprint(f'popped {f}, remaining: {funcs}')
+            self.vprint(f'popped {f.name}, remaining funcs: {[func.name for func in funcs]}')
 
             # outs is a list of weakrefs
             # https://chat.openai.com/share/136a9879-bd08-40f7-a9f8-97bd02821012
@@ -88,13 +97,13 @@ class Variable:
                 self.vprint('converting gxs to tuple...')
                 gxs = (gxs,)
 
+            self.vprint(f'f.inputs: {[var.name for var in f.inputs]}')
             for x, gx in zip(f.inputs, gxs):
-
                 # if statement for ADD operations (p.123)
                 if x.grad is None:
                     x.grad = gx
                 else:
-                    self.vprint('gradient added!')
+                    self.vprint(f'gradient added! -> {x.grad} + {gx}')
                     x.grad = x.grad + gx
 
                 if x.creator is not None:
@@ -107,7 +116,7 @@ class Variable:
 
 
 class Function:
-    def __call__(self, *inputs: 'Variable') -> Any:
+    def __call__(self, *inputs: 'Variable', name: str = 'default') -> Any:
 
         self.inputs = inputs
         xs = [inp.data for inp in inputs]  # decapsulate
@@ -115,6 +124,11 @@ class Function:
         ys = ys if isinstance(ys, tuple) else (ys,)
 
         self.generation = max([x.generation for x in inputs])
+
+        self.name_suffix = name
+        self.name = self.__class__.__name__ + '_' + str(self.generation)
+        if name != 'default':
+            self.name = self.name + '_' + self.name_suffix
 
         """
         0 dimension np arrays will return np.float after operations for whatever reason!!

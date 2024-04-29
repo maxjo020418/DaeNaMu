@@ -5,9 +5,11 @@ for i in range(10):
     y = Square()(Square()(Square()(x)))
 """
 
-x = Variable(np.array(2.0))
-a = Square()(x)
-y = Add()(Square()(a), Square()(a))
+x = Variable(np.array(2.0), name='x')
+a = Square()(x, name='a')
+y = Add()(
+    Square()(a, name='y-left'),
+    Square()(a, name='y-right'))
 y.backward()
 
 print(y.data)
