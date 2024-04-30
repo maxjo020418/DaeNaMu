@@ -2,11 +2,14 @@ import numpy as np
 import weakref
 from typing import Any, List
 from dataclasses import dataclass
+from memory_profiler import profile
+import gc
 
 
 @dataclass
 class Config:
     verbose: bool = True
+    enable_backprop: bool = False
 
 
 class Variable:
@@ -53,6 +56,7 @@ class Variable:
         if self.name_suffix != 'default':
             self.name = self.name + '_' + self.name_suffix
 
+    @profile
     def backward(self, retain_grad=False) -> None:
         """
 
@@ -60,7 +64,11 @@ class Variable:
         self.vprint('=== begin backprop ===')
 
         if self.grad is None:
-            # I think this counts as filling in dummy data
+            """
+            it's common in such frameworks to default this initial gradient to 1. 
+            This means it assumes the gradient of the loss with respect to y is 1, 
+            essentially simulating a loss function where the derivative of the loss with respect to its input is 1.
+            """
             self.grad = np.ones_like(self.data)
             self.vprint(f'filled in default grad {self.grad}')
 
@@ -97,7 +105,8 @@ class Variable:
                 self.vprint('converting gxs to tuple...')
                 gxs = (gxs,)
 
-            self.vprint(f'f.inputs: {[var.name for var in f.inputs]}')
+            self.vprint(f'f.inputs: {[var.name for var in f.inputs]} | '
+                        f'f.outs (weakrefs): {[var().name for var in f.outs]}')
             for x, gx in zip(f.inputs, gxs):
                 # if statement for ADD operations (p.123)
                 if x.grad is None:
@@ -111,6 +120,12 @@ class Variable:
                 else:
                     self.vprint('breaking loop!')
 
+            if not retain_grad:
+                self.vprint(f'deleting grads: {[var().name for var in f.outs]}')
+                for y in f.outs:
+                    y().grad = None
+                    # delattr(y(), 'grad')
+
             self.vprint('='*10)
             i += 1
 
@@ -118,12 +133,23 @@ class Variable:
 class Function:
     def __call__(self, *inputs: 'Variable', name: str = 'default') -> Any:
 
-        self.inputs = inputs
+        def as_array(y):
+            return np.array(y) if np.isscalar(y) else y
+
         xs = [inp.data for inp in inputs]  # decapsulate
         ys = self.forward(*xs)
         ys = ys if isinstance(ys, tuple) else (ys,)
 
+        outs = [Variable(as_array(y)) for y in ys]
+
+        # 원래 아래 2줄은 아래 if statement 안에 있어야 하는데, 이름 표기 문제 이유 때문에 밖에 둠.
         self.generation = max([x.generation for x in inputs])
+        [out.set_creator(self) for out in outs]
+
+        if Config.enable_backprop:
+            self.inputs = inputs
+            # self 있어야 함! 안 그러면 reference count 날라감!
+            self.outs = [weakref.ref(out) for out in outs]  # p.149
 
         self.name_suffix = name
         self.name = self.__class__.__name__ + '_' + str(self.generation)
@@ -131,27 +157,11 @@ class Function:
             self.name = self.name + '_' + self.name_suffix
 
         """
-        0 dimension np arrays will return np.float after operations for whatever reason!!
+        0 dimension np arrays will return np.float after operations!
         https://stackoverflow.com/questions/77359660/why-does-operating-on-a-0d-numpy-array-give-a-numpy-float
         https://stackoverflow.com/questions/773030/why-are-0d-arrays-in-numpy-not-considered-scalar
         made to cast it back to np.array before passing it in case it is a scalar
         """
-
-        def as_array(y):
-            return np.array(y) if np.isscalar(y) else y
-
-        outs = [Variable(as_array(y)) for y in ys]
-        [out.set_creator(self) for out in outs]
-        self.outs = [weakref.ref(out) for out in outs]  # p.149
-
-        # checks if all the Variable's `.creator` in the `inputs` are the same
-        # creators = [inp.creator.layer_id for inp in self.inputs]
-        # if len(set(creators)) != 1:
-        #    raise Exception('Some of the variables are from a different creator/parent!\n'
-        #                    f'creator lists dump: {collections.Counter(creators)}')
-        # setting layer ID if the above assertion passes
-        # used creators[0]'s layer_id since it's going to be all the same anyway
-        # self.layer_id = prev_layer.layer_id + 1 if (prev_layer := creators[0]) else 0
 
         return outs if len(outs) > 1 else outs[0]
 
