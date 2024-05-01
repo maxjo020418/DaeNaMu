@@ -12,5 +12,10 @@ y = Add()(
     Square()(a, name='y-right'))
 y.backward()
 
-print(y.data)
+print(y)
 print(x.grad)
+
+with using_config('enable_backprop', False):
+    x = Variable(np.array(2.0))
+    y = Square()(x)
+    print(y)

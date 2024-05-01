@@ -3,13 +3,12 @@ import weakref
 from typing import Any, List
 from dataclasses import dataclass
 from memory_profiler import profile
-import gc
 
 
 @dataclass
 class Config:
     verbose: bool = True
-    enable_backprop: bool = False
+    enable_backprop: bool = True
 
 
 class Variable:
@@ -37,6 +36,40 @@ class Variable:
         if name != 'default':
             self.name = self.name + '_' + self.name_suffix
 
+    def __len__(self):
+        return len(self.data)
+
+    def __repr__(self):
+        if self.data is None:  # when None
+            return 'Variable(None)'
+        p = str(self.data).replace('\n', '\n' + ' '*9)
+        return f'Variable({p})'
+
+    def __mul__(self, other):
+        return Mul()(self, other)
+
+    def __add__(self, other):
+        return Add()(self, other)
+
+    @property
+    def shape(self):
+        return self.data.shape
+
+    @property
+    def ndim(self):
+        return self.data.size
+
+    @property
+    def size(self):
+        return self.data.size
+
+    @property
+    def dtype(self):
+        return self.data.dtype
+
+    def cleargrad(self):
+        self.grad = None
+
     @staticmethod
     def _verbose_print(*inp, end: str = None) -> None:
         print(*inp, end=end)
@@ -44,9 +77,6 @@ class Variable:
     @staticmethod
     def _silent_print(*inp, end: str = None) -> None:
         return
-
-    def cleargrad(self):
-        self.grad = None
 
     def set_creator(self, func: 'Function') -> None:
         self.creator = func
@@ -56,7 +86,7 @@ class Variable:
         if self.name_suffix != 'default':
             self.name = self.name + '_' + self.name_suffix
 
-    @profile
+    # @profile
     def backward(self, retain_grad=False) -> None:
         """
 
@@ -86,7 +116,8 @@ class Variable:
                 self.vprint(f'{func.name} in `seen_set`!')
 
         add_func(self.creator)
-        self.vprint('loop init:\n', 'funcs:', [func.name for func in funcs], '\nseen_set:', [seen.name for seen in seen_set], '\n', '='*10)
+        self.vprint('loop init:\n', 'funcs:', [func.name for func in funcs],
+                    '\nseen_set:', [seen.name for seen in seen_set], '\n', '='*10)
 
         i = 1
         while funcs:
@@ -170,3 +201,61 @@ class Function:
 
     def backward(self, x):
         raise NotImplementedError()
+
+# =================================================================================== #
+
+# import numpy as np
+# from .main import Function, Config
+import contextlib
+
+
+@contextlib.contextmanager
+def using_config(name: str, value):
+    old_val = getattr(Config, name)
+    setattr(Config, name, value)
+    try:
+        yield
+    finally:
+        setattr(Config, name, old_val)
+
+
+class Add(Function):
+    def forward(self, x0, x1):
+        y = x0 + x1
+        return y
+
+    def backward(self, gy):
+        return gy, gy
+
+
+# gy: y's gradient with respect to output(can be Loss)
+class Square(Function):
+    def forward(self, x):
+        return x ** 2
+
+    def backward(self, gy):
+        # using the first element of `inputs`,
+        # every element inside `inputs` should be all same.
+        x = self.inputs[0].data
+        gx = 2 * x * gy
+        return gx
+
+
+class Exp(Function):
+    def forward(self, x):
+        return np.exp(x)
+
+    def backward(self, gy):
+        x = self.inputs[0].data
+        gx = np.exp(x) * gy
+        return gx
+
+
+class Mul(Function):
+    def forward(self, x0, x1):
+        y = x0 * x1
+        return y
+
+    def backward(self, gy):
+        x0, x1 = self.inputs[0].data, self.inputs[1].data
+        return gy * x1, gy * x0
