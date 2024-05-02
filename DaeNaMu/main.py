@@ -2,13 +2,23 @@ import numpy as np
 import weakref
 from typing import Any, List
 from dataclasses import dataclass
-from memory_profiler import profile
+# from memory_profiler import profile
 
 
 @dataclass
 class Config:
     verbose: bool = True
     enable_backprop: bool = True
+
+
+def as_array(y):
+    return np.array(y) if np.isscalar(y) else y
+
+
+def as_variable(obj):
+    if isinstance(obj, Variable):
+        return obj
+    return Variable(obj)
 
 
 class Variable:
@@ -45,11 +55,63 @@ class Variable:
         p = str(self.data).replace('\n', '\n' + ' '*9)
         return f'Variable({p})'
 
-    def __mul__(self, other):
-        return Mul()(self, other)
+    # setting the priority to not get overwritten/casted by other classes
+    # eg: `Variable + np.array = Variable` will always happen if
+    # __array_priority__ is set to 200 (higher than np.array)
+    __array_priority__ = 200
 
     def __add__(self, other):
+        return self.add(other)
+
+    def __radd__(self, other):
+        return self.add(other)
+
+    def __sub__(self, other):
+        return self.sub(other)
+
+    def __rsub__(self, other):
+        return self.sub(other)
+
+    def __mul__(self, other):
+        return self.mul(other)
+
+    def __truediv__(self, other):
+        return self.div(other)
+
+    def __rtruediv__(self, other):
+        return self.rdiv(other)
+
+    def __rmul__(self, other):
+        return self.mul(other)
+
+    def __pow__(self, power):
+        return self.pow(power)
+
+    def add(self, other):
+        other = as_array(other)
         return Add()(self, other)
+
+    def sub(self, other):
+        other = as_array(other)
+        return Sub()(self, other)
+
+    def mul(self, other):
+        other = as_array(other)
+        return Mul()(self, other)
+
+    def div(self, other):
+        other = as_array(other)
+        return Div()(self, other)
+
+    def rdiv(self, other):
+        other = as_array(other)
+        return Div()(other, self)
+
+    def pow(self, c):
+        return Pow(c)(self)
+
+    def neg(self):
+        return Neg()(self)
 
     @property
     def shape(self):
@@ -164,8 +226,7 @@ class Variable:
 class Function:
     def __call__(self, *inputs: 'Variable', name: str = 'default') -> Any:
 
-        def as_array(y):
-            return np.array(y) if np.isscalar(y) else y
+        inputs = [as_variable(x) for x in inputs]
 
         xs = [inp.data for inp in inputs]  # decapsulate
         ys = self.forward(*xs)
@@ -228,6 +289,15 @@ class Add(Function):
         return gy, gy
 
 
+class Sub(Function):
+    def forward(self, x0, x1):
+        y = x0 - x1
+        return y
+
+    def backward(self, gy):
+        return gy, -gy
+
+
 # gy: y's gradient with respect to output(can be Loss)
 class Square(Function):
     def forward(self, x):
@@ -259,3 +329,37 @@ class Mul(Function):
     def backward(self, gy):
         x0, x1 = self.inputs[0].data, self.inputs[1].data
         return gy * x1, gy * x0
+
+
+class Div(Function):
+    def forward(self, x0, x1):
+        y = x0 / x1
+        return y
+
+    def backward(self, gy):
+        x0, x1 = self.inputs[0].data, self.inputs[1].data
+        gx0 = gy / x1
+        gx1 = gy * (-x0 / x1 ** 2)
+        return gx0, gx1
+
+
+class Pow(Function):
+    def __init__(self, c):
+        self.c = c
+
+    def forward(self, x):
+        y = x ** self.c
+        return y
+
+    def backward(self, gy):
+        x = self.inputs[0].data
+        gx = self.c * x ** (self.c - 1) * gy
+        return gx
+
+
+class Neg(Function):
+    def forward(self, x):
+        return -x
+
+    def backward(self, gy):
+        return -gy
