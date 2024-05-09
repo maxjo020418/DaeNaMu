@@ -1,4 +1,4 @@
-from DaeNaMu.main import *
+from DaeNaMu.core_simple import *
 
 
 def _dot_var(v: 'Variable', verbose=False):
