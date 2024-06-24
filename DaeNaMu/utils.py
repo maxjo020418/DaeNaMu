@@ -1,4 +1,6 @@
-from DaeNaMu.core_simple import *
+from DaeNaMu import *
+import os
+import subprocess
 
 
 def _dot_var(v: 'Variable', verbose=False):
@@ -45,3 +47,21 @@ def get_dot_graph(output: 'Variable', verbose=False):
                 add_func(x.creator)
 
     return f'digraph g {{\n{txt}}}'
+
+
+def plot_dot_graph(output, verbose=True, to_file='graph.png'):
+    dot_graph = get_dot_graph(output, verbose)
+
+    # dot 데이터를 파일에 저장
+    tmp_dir = os.path.join(os.path.expanduser('~'), '.dezero')
+    if not os.path.exists(tmp_dir): #~/.dezero 디렉터리가 없다면 새로 생성
+        os.mkdir(tmp_dir)
+    graph_path = os.path.join(tmp_dir, 'tmp_graph.dot')
+
+    with open(graph_path, 'w') as f:
+        f.write(dot_graph)
+
+    #dot 명령 호출
+    extension = os.path.splitext(to_file) [1] [1:] # png, pdf...
+    cmd = 'dot {} -T {} -o {}'.format(graph_path, extension, to_file)
+    subprocess.run(cmd, shell=True)

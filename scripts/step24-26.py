@@ -15,11 +15,10 @@ def rosenbrock(x0, x1):
     return 100 * (x1 - x0**2)**2 + (1 - x0)**2
 
 
-x0 = Variable(np.array(0.0), name='x0')
-x1 = Variable(np.array(2.0), name='x1')
-y = rosenbrock(x0, x1)
+x0 = Variable(np.array(1.0), name='x0')
+x1 = Variable(np.array(1.0), name='x1')
+y = goldstein(x0, x1)
 y.backward()
 print(x0.grad, x1.grad)
 
-with open(f'../outputs/rosenbrock-graph.dot', 'w') as f:
-    f.write(get_dot_graph(y))
+plot_dot_graph(y, verbose=False, to_file='goldstein.png')

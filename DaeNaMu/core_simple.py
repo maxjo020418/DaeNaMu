@@ -149,7 +149,7 @@ class Variable:
             self.name = self.name + '_' + self.name_suffix
 
     # @profile
-    def backward(self, retain_grad=False) -> None:
+    def backward(self, retain_grad=False, create_graph=False) -> None:
         """
 
         """
@@ -161,7 +161,8 @@ class Variable:
             This means it assumes the gradient of the loss with respect to y is 1, 
             essentially simulating a loss function where the derivative of the loss with respect to its input is 1.
             """
-            self.grad = np.ones_like(self.data)
+            # self.grad = np.ones_like(self.data) # for the old dmethod
+            self.grad = Variable(np.ones_like(self.data))
             self.vprint(f'filled in default grad {self.grad}')
 
         funcs = list()
@@ -191,27 +192,29 @@ class Variable:
             # https://chat.openai.com/share/136a9879-bd08-40f7-a9f8-97bd02821012
             gys = [out().grad for out in f.outs]
 
-            gxs = f.backward(*gys)
-            self.vprint(f'gys: {gys}, gxs: {gxs}')
+            with using_config('enable_backprop', create_graph):
+                gxs = f.backward(*gys)
+                self.vprint(f'gys: {gys}, gxs: {gxs}')
 
-            if not isinstance(gxs, tuple):
-                self.vprint('converting gxs to tuple...')
-                gxs = (gxs,)
+                if not isinstance(gxs, tuple):
+                    self.vprint('converting gxs to tuple...')
+                    gxs = (gxs,)
 
-            self.vprint(f'f.inputs: {[var.name for var in f.inputs]} | '
-                        f'f.outs (weakrefs): {[var().name for var in f.outs]}')
-            for x, gx in zip(f.inputs, gxs):
-                # if statement for ADD operations (p.123)
-                if x.grad is None:
-                    x.grad = gx
-                else:
-                    self.vprint(f'gradient added! -> {x.grad} + {gx}')
-                    x.grad = x.grad + gx
+                self.vprint(f'f.inputs: {[var.name for var in f.inputs]} | '
+                            f'f.outs (weakrefs): {[var().name for var in f.outs]}')
+                for x, gx in zip(f.inputs, gxs):
+                    # if statement for ADD operations (p.123)
+                    if x.grad is None:
+                        x.grad = gx
+                    else:
+                        self.vprint(f'gradient added! -> {x.grad} + {gx}')
+                        x.grad = x.grad + gx
 
-                if x.creator is not None:
-                    add_func(x.creator)
-                else:
-                    self.vprint('breaking loop!')
+                    if x.creator is not None:
+                        add_func(x.creator)
+                    else:
+                        self.vprint('breaking loop!')
+
 
             if not retain_grad:
                 self.vprint(f'deleting grads: {[var().name for var in f.outs]}')
