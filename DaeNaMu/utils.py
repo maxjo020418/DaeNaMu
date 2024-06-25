@@ -18,7 +18,7 @@ def _dot_func(f: 'Function'):
 
     for x in f.inputs:
         txt += f'{id(x)} -> {id(f)}\n'
-    for y in f.outs:
+    for y in f.outputs:
         txt += f'{id(f)} -> {id(y())}\n'
 
     return txt
