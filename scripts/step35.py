@@ -5,7 +5,7 @@ x = Variable(np.array(1.0))
 y = Tanh()(x)
 y.backward(create_graph=True)
 
-iters = 4
+iters = 3
 
 for i in range(iters):
     print(f'LOOP => {i}')
